@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>戰情室資料解析與圖表計算說明</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans TC", sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f4f7f6;
+        }
+        h1 {
+            color: #1a202c;
+            border-bottom: 2px solid #cbd5e0;
+            padding-bottom: 10px;
+        }
+        h2 {
+            font-size: 1.25em;
+            color: #2b6cb0;
+            margin-top: 30px;
+            margin-bottom: 15px;
+            border-left: 4px solid #3182ce;
+            padding-left: 12px;
+        }
+        .intro {
+            background: #fff;
+            padding: 16px 24px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 24px;
+        }
+        .intro h3 {
+            color: #2c5282;
+            margin-top: 0;
+            margin-bottom: 10px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #fff;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 24px;
+        }
+        th, td {
+            padding: 14px 16px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+            vertical-align: top;
+        }
+        th {
+            background-color: #edf2f7;
+            font-weight: 600;
+            color: #2d3748;
+        }
+        tr:last-child td {
+            border-bottom: none;
+        }
+        tr:hover {
+            background-color: #f7fafc;
+        }
+        code {
+            background-color: #edf2f7;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 0.9em;
+            color: #dd6b20;
+        }
+        ul {
+            margin-top: 4px;
+            margin-bottom: 8px;
+            padding-left: 20px;
+        }
+        .badge {
+            display: inline-block;
+            background: #e2e8f0;
+            color: #4a5568;
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-size: 0.85em;
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+        .src-label {
+            display: inline-block;
+            background: #c6f6d5;
+            color: #22543d;
+            font-size: 0.8em;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-right: 6px;
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+        .src-label.manual {
+            background: #feebc8;
+            color: #7b341e;
+        }
+        .src-label.sheet {
+            background: #e9d8fd;
+            color: #44337a;
+        }
+        .highlight-box {
+            background: #f7fafc;
+            border: 1px solid #e2e8f0;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            font-size: 0.95em;
+        }
+        .math-box {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 12px;
+            border-radius: 6px;
+            font-family: ui-monospace, SFMono-Regular, monospace;
+            margin-top: 8px;
+            margin-bottom: 8px;
+            font-size: 0.95em;
+        }
+        .plus { color: #fc8181; font-weight: bold; }
+        .minus { color: #68d391; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <h1>戰情室資料解析與圖表計算說明</h1>
+
+    <div class="intro">
+        <h3>📊 整體數據來源解析</h3>
+        <p>戰情室的數據由 Google Apps Script (<code>Code.gs</code>) 在背景定時收集與計算，主要資料來源分為三大類：</p>
+        <div class="highlight-box">
+            <span class="src-label">爬蟲擷取</span> <strong>即時病患資料：</strong> 系統會自動登入並爬取醫院急診網頁（ErBedQry_ER.aspx）的表格內容。會抓取的欄位包含：<strong>狀態</strong>（是否為現掛、看診中）、<strong>檢傷級別</strong>（1~5級）、<strong>掛號時間</strong>、<strong>床位名稱</strong>、<strong>科別</strong>、<strong>動向</strong>（OA/PA/OACU 等）。<br><br>
+            <span class="src-label manual">直接給定數字</span> <strong>醫護人力班表：</strong> 護理師人數與醫師排班目前是<strong>直接寫死 (Hardcoded) 填寫在程式碼常數中</strong>（包含 <code>NURSING</code>, <code>SCHEDULE</code>, <code>NP_SCHEDULE</code>）。系統會根據執行當下的時間，自動去對應陣列中的當班人數。<br><br>
+            <span class="src-label sheet">外部試算表</span> <strong>歷史滾動數據：</strong> 28天的等床大數據，是透過程式讀取另一份 Google 試算表（<code>ER_Data</code> 工作表）中的歷史結案資料。
+        </div>
+    </div>
+
+    <h2>一、關鍵 KPI 與核心指標計算</h2>
+    <table>
+        <thead>
+            <tr>
+                <th width="16%">指標名稱</th>
+                <th width="84%">資料來源與詳細計算方式</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>戰情痛苦指數</strong><br>(Pain Index)</td>
+                <td>
+                    <strong>計算邏輯：</strong> 綜合評估急診當下的環境壓力與醫療團隊戰力，計算公式為：
+                    <div class="math-box">痛苦指數 = 環境壓力(加分) - 團隊戰力(減分) &nbsp;&nbsp;<span>(若結果小於0，則以0計)</span></div>
+                    
+                    <span class="plus">🔴 環境壓力 (指標加分，數值越高表示急診越緊繃)：</span>
+                    <ul>
+                        <li><strong>過去 1 小時來診人數</strong> × 2</li>
+                        <li><strong>現掛 (未看診) 人數</strong> × 3</li>
+                        <li><strong>急救室人數</strong> × 10</li>
+                        <li><strong>待一般床 (OA/PA) 人數</strong> × 2</li>
+                        <li><strong>待加護病房 (ICU) 人數</strong> × 5</li>
+                        <li><strong>無動向人數</strong> × 1</li>
+                        <li><strong>滯留大於 24 小時人數</strong> × 3</li>
+                        <li><strong>滯留大於 48 小時人數</strong> × 5</li>
+                        <li><strong>滯留大於 72 小時人數</strong> × 10</li>
+                    </ul>
+
+                    <span class="minus">🟢 團隊戰力 (指標減分，數值越高表示紓解能力越強)：</span>
+                    <ul>
+                        <li><strong>主治醫師人數</strong> × 10</li>
+                        <li><strong>住院醫師人數</strong> × 5</li>
+                        <li><strong>總醫師/高階住院醫師人數</strong> × 10</li>
+                        <li><strong>專科護理師 (NP) 人數</strong> × 5</li>
+                        <li><strong>護理師總人數</strong> × 2</li>
+                        <li><i style="color:#a0aec0">特例：資深主治醫師人數 × 5 (由於臨床負擔不同，此項在程式碼中設定為扣減團隊總戰力)</i></li>
+                    </ul>
+                </td>
+            </tr>
+            <tr>
+                <td><strong>醫師人力</strong><br>(Physician Count)</td>
+                <td>
+                    <span class="src-label manual">直接給定數字</span> <br>
+                    <strong>資料來源與計算：</strong> 系統會取用當下時間 (<code>now.getHours()</code>)，自動去比對寫在程式碼中的 <code>SCHEDULE</code> 及 <code>NP_SCHEDULE</code> 常數（區分為日班 08:00~20:00、夜班 20:00~08:00 等）。
+                    <ul>
+                        <li><strong>主治醫師：</strong> 預設在 10:00~22:00 時段為 4 人，其餘時段為 3 人。程式會檢查當班班表中是否有「兒科支援醫師 (pe)」，若有，主治醫師總人數會再 <strong>+1</strong>。</li>
+                        <li><strong>其他醫師：</strong> 住院醫師 (rc)、總醫師/資深住院醫師 (src)、資深主治醫師 (sac)，全部依照該時段班表上寫入的數字直接套用。</li>
+                        <li><strong>專科護理師 (NP)：</strong> 獨立讀取 <code>NP_SCHEDULE</code> 班表，依照白班(08:00~16:00)、小夜(16:00~00:00)、大夜(00:00~08:00) 的設定取值。</li>
+                    </ul>
+                </td>
+            </tr>
+            <tr>
+                <td><strong>各分區人數判定</strong><br>(Area Classification)</td>
+                <td>
+                    <span class="src-label">爬蟲擷取</span><br>
+                    <strong>資料來源與計算：</strong> 程式透過 <code>classifyPatient()</code> 函數，讀取每一列網頁表格的<strong>「床位名稱」</strong>與<strong>「科別」</strong>欄位，使用文字關鍵字進行歸類：
+                    <ul>
+                        <li><strong>急救室 (resus)：</strong> 床位名稱包含「急救室」或是以「急」字開頭。</li>
+                        <li><strong>婦產科 (obgyn)：</strong> 科別名稱包含「婦產」或是床位包含「婦」字。</li>
+                        <li><strong>兒科 (peds)：</strong> 科別名稱包含「兒」字，或是床位名稱以英文字母 <code>P</code> (不分大小寫) 開頭。</li>
+                        <li><strong>留觀區 (obs)：</strong> 床位名稱以字母 <code>C</code> 或 <code>F</code> 開頭（但必須排除 "C柱下" 與 "F柱下"）。</li>
+                        <li><strong>A 區 (zoneA)：</strong> 床位名稱為「C柱下」，或是以字母 <code>A</code>、數字 <code>1</code>、或「篩」字開頭。若病患不符合以上任何一區的條件，<strong>系統會預設將其歸類於 A 區</strong>。</li>
+                        <li><strong>B 區 (zoneB)：</strong> 床位名稱為「F柱下」，或是以字母 <code>B</code>、數字 <code>2</code>、或「縫」字開頭。</li>
+                    </ul>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>二、戰情室圖表計算方式與來源細節</h2>
+    <table>
+        <thead>
+            <tr>
+                <th width="12%">位置</th>
+                <th width="18%">標題</th>
+                <th width="70%">圖表資料來源與詳細計算方式</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><span class="badge">主頁面</span><br><code>id="trend"</code></td>
+                <td><strong>病人數趨勢</strong></td>
+                <td>
+                    <span class="src-label">爬蟲擷取</span> <br>
+                    <strong>資料來源：</strong> 抓取急診網頁的<strong>「狀態」</strong>與<strong>「檢傷級別」</strong>欄位。<br>
+                    <strong>計算邏輯：</strong> 
+                    <ul>
+                        <li><code>total</code> (總人數)：只要狀態欄位包含「看診中」、「現掛」或「回診」，就會計算在總人數內（人數 +1）。</li>
+                        <li><code>L1~L5</code>：判斷表格「檢傷」欄位，落入 01~05 哪一級就加總到該級別人數。</li>
+                        <li><strong>圖表呈現：</strong> 遍歷使用者選定的時間區間內的歷史資料，分別讀取每個時間點的 <code>total</code>、<code>(L1+L2)</code>、<code>(L3+L4+L5)</code>、以及各別的 <code>L1</code> ~ <code>L5</code> 人數，組成多條折線。</li>
+                    </ul>
+                </td>
+            </tr>
+            <tr>
+                <td><span class="badge">主頁面</span><br><code>id="ratioChart"</code></td>
+                <td><strong>護病比趨勢</strong></td>
+                <td>
+                    <span class="src-label manual">直接給定數字</span> <span class="src-label">爬蟲擷取</span><br>
+                    <strong>資料來源：</strong> <strong>護理師人數</strong>是由 <code>NURSING</code> 常數查表取得，<strong>病患人數</strong>則是從網頁抓取並依據前述「分區判定」歸類。<br>
+                    <strong>計算邏輯：</strong> 每個時間點的護病比皆為 <code>該區病人數 ÷ 該區分配的護理師人數</code>。
+                    <ul>
+                        <li><strong>總護病比：</strong> <code>爬取的總人數 ÷ 當班總護理師人數</code>。</li>
+                        <li><strong>各區護理師分配規則：</strong> <br>
+                            急救室：預設分配 1 人 (若急救病人 ≥2 人且非大夜班，則分配 2 人)。<br>
+                            留觀區：固定分配 2 人。<br>
+                            兒科：固定分配 1 人。<br>
+                            檢傷：固定分配 1 人。<br>
+                            A區 / B區：將剩餘護理師平分，公式為 <code>(總護理師數 - 急救 - 留觀 - 兒科 - 檢傷) ÷ 2</code>。
+                        </li>
+                    </ul>
+                </td>
+            </tr>
+            <tr>
+                <td><span class="badge">彈出視窗</span><br>點擊「來診」</td>
+                <td><strong>每小時來診量趨勢</strong></td>
+                <td>
+                    <span class="src-label">爬蟲擷取</span><br>
+                    <strong>資料來源：</strong> 抓取網頁表格中的<strong>「報到/掛號時間」</strong>欄位。<br>
+                    <strong>計算邏輯：</strong> 在每次爬蟲執行的當下，計算病人的 <code>(現在時間 - 掛號時間)</code>。若時間差落在 0~60 分鐘以內，則視為「過去 60 分鐘內的來診」，加總後繪製成單一面積的填滿折線圖。
+                </td>
+            </tr>
+            <tr>
+                <td><span class="badge">彈出視窗</span><br>點擊「待床/待ICU」</td>
+                <td><strong>待床 / 待ICU趨勢</strong></td>
+                <td>
+                    <span class="src-label">爬蟲擷取</span><br>
+                    <strong>資料來源：</strong> 抓取網頁表格中的<strong>「動向」</strong>欄位。<br>
+                    <strong>計算邏輯：</strong> 
+                    <ul>
+                        <li>若動向欄位含有 <code>OACU</code> 或 <code>PACU</code>，則算作 <strong>待ICU人數</strong>。</li>
+                        <li>若動向欄位含有 <code>OA</code> 或 <code>PA</code> (且排除加護病房字眼)，則算作 <strong>待一般床人數</strong>。</li>
+                        <li>將這兩個數值的時間變化繪製成兩條對比折線圖。</li>
+                    </ul>
+                </td>
+            </tr>
+            <tr>
+                <td><span class="badge">彈出視窗</span><br>點擊「等床中位數」</td>
+                <td><strong>現存等床時間分析</strong></td>
+                <td>
+                    <span class="src-label">爬蟲擷取</span><br>
+                    <strong>資料來源：</strong> 抓取網頁中的<strong>「掛號時間」</strong>與<strong>「動向」</strong>欄位。<br>
+                    <strong>計算邏輯：</strong> 先篩選出動向為「待床」或「待ICU」且非回診的病人。算出這些病人實際的等床時間（<code>現在時間 - 掛號時間</code>，以分鐘計算）。將這些分鐘數存入陣列排序後，依序計算出：
+                    <ul>
+                        <li><strong>平均數 (Mean)</strong></li>
+                        <li><strong>25% 分位數 (Q1)</strong></li>
+                        <li><strong>中位數 (Median)</strong></li>
+                        <li><strong>75% 分位數 (Q3)</strong></li>
+                    </ul>
+                    最後將算出的分鐘數除以 60 轉換為小時，繪製成四條線的統計趨勢圖。
+                </td>
+            </tr>
+            <tr>
+                <td><span class="badge">彈出視窗</span><br>點擊「平均待床28天」</td>
+                <td><strong>平均待床 / 平均ICU分析</strong></td>
+                <td>
+                    <span class="src-label sheet">外部試算表</span><br>
+                    <strong>資料來源：</strong> 從 <code>ER_Data</code> 歷史試算表讀取過去的<strong>「掛號/報到時間」、「滯留時間」、「動向」</strong>欄位。<br>
+                    <strong>計算邏輯：</strong> 以執行當下時間往前推算 28 天 (60*24*3600*1000 毫秒)。篩選出歷史紀錄中動向符合 OA/PA/OACU/PACU 且包含「住院」字眼的已結案資料。擷取他們實際的「滯留時間」後，算出這 28 天資料池的平均值、中位數、Q1、Q3，繪製成四條折線圖。
+                </td>
+            </tr>
+            <tr>
+                <td><span class="badge">彈出視窗</span><br>點擊「總人數」(上)</td>
+                <td><strong>檢傷分佈</strong></td>
+                <td>
+                    <span class="src-label">爬蟲擷取</span><br>
+                    <strong>計算邏輯：</strong> 抓取系統中最新一筆資料快照，將當下的 <code>L1</code> 到 <code>L5</code> 的實際人數數值，直接繪製成單一時間點的甜甜圈比例圖。
+                </td>
+            </tr>
+            <tr>
+                <td><span class="badge">彈出視窗</span><br>點擊「總人數」(下)</td>
+                <td><strong>現掛(未看)人數趨勢</strong></td>
+                <td>
+                    <span class="src-label">爬蟲擷取</span><br>
+                    <strong>資料來源：</strong> 網頁表格的<strong>「狀態」</strong>欄位。<br>
+                    <strong>計算邏輯：</strong> 若該病人狀態包含「現掛」字眼，即判定為尚未看診（<code>unseen</code> 人數 +1），並遍歷時間區間繪製成時間趨勢折線圖。
+                </td>
+            </tr>
+            <tr>
+                <td><span class="badge">彈出視窗</span><br>點擊「區域分佈」</td>
+                <td><strong>區域分佈</strong></td>
+                <td>
+                    <span class="src-label">爬蟲擷取</span><br>
+                    <strong>計算邏輯：</strong> 透過上述的 <code>classifyPatient()</code> 分區規則將所有病人歸類完成後，取用最新一筆快照，擷取急救室、A區、B區、留觀、兒科、婦產科當下的人數，繪製成甜甜圈比例圖。
+                </td>
+            </tr>
+            <tr>
+                <td><span class="badge">彈出視窗</span><br>點擊「滯留時間」</td>
+                <td><strong>滯留時間</strong></td>
+                <td>
+                    <span class="src-label">爬蟲擷取</span><br>
+                    <strong>資料來源：</strong> 網頁表格的<strong>「掛號時間」</strong>欄位。<br>
+                    <strong>計算邏輯：</strong> 計算非回診病患的 <code>(現在時間 - 掛號時間)</code>。若大於 24小時、48小時或 72小時，則分別加總至對應的人數變數（例如 <code>gt24</code>, <code>gt48</code>, <code>gt72</code>），最後繪製成三條超過長期佔床時數的折線圖。
+                </td>
+            </tr>
+        </tbody>
+    </table>
+
+</body>
+</html>
